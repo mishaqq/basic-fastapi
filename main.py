@@ -1,32 +1,51 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
+from typing import List, Annotated
+import models
+from database import SessionLocal, engine
+from sqlalchemy.orm import Session
 
 app = FastAPI()
+models.Base.metadata.create_all(bind=engine)
 
-class Item(BaseModel):
-    text : str = None
-    isDone : bool = None
+def get_db():
+        db = SessionLocal()
+        try:
+                yield db
+        finally:
+                db.close()
 
-items = [ ]
+db_dependency = Annotated[Session, Depends(get_db)]
+
+
+class User(BaseModel):
+    username: str
+
+class HostedGame(BaseModel):
+    title: str
+    startDate: str
+    isActive: bool
 
 
 @app.get("/")
 def helloWorld():
         return {"hello": "world"}
 
-@app.post("/add-item", response_model=list[Item])
-def createItem(item: Item):
-        items.append(item)
-        return items
+@app.post("/addUser")
+async def addUser(user: User, db: db_dependency):
+       db_User = models.User(username = user.username)
+       db.add(db_User)
+       db.commit()
 
+       return {"user": user}
 
-@app.get("/get-item/{item_id}", response_model=Item)
-def getItem(id : int) -> Item:
-	if id < len(items):
-		return items[id]
-	else:
-		raise HTTPException(status_code=404, detail="Item not found")
+# @app.get("/get-item/{item_id}", response_model=Item)
+# def getItem(id : int) -> Item:
+# 	if id < len(items):
+# 		return items[id]
+# 	else:
+# 		raise HTTPException(status_code=404, detail="Item not found")
 
-@app.get("/items")
-def getItems(limit: int = 10):
-        return items[0:limit]
+# @app.get("/items")
+# def getItems(limit: int = 10):
+#         return items[0:limit]
