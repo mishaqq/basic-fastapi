@@ -12,7 +12,7 @@ import jwt
 from jwt.exceptions import InvalidTokenError
 SECRET = "692231733f2092790aff8c5aa3a874480775d5c241cf09de0a876344350abf70"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1
+ACCESS_TOKEN_EXPIRE_MINUTES = 5
 
 app = FastAPI()
 
@@ -37,11 +37,20 @@ class User(BaseModel):
     email: EmailStr | None = None
 
 class UserInDB(User):
-    hashed_password: str
+    hashed_password: str | None = None
+    id: str | None = None
 
 class UserIn(User):
     password: str
 
+class HostedGame(BaseModel):
+        title: str
+        startDate: datetime | None = None
+        isActive: bool 
+        host: str | None = None
+        
+        class Config:
+                from_attributes = True
 def veryfy_password(password, hashed_password):
         return pwd_context.verify(password, hashed_password)
 
@@ -55,7 +64,7 @@ async def authenticate_user(username: str, password: str, db: Session):
                 return None
         return UserInDB(id=user.id, username=user.username, email=user.email, hashed_password=user.hashed_password)
         
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: db_dependency) -> User:
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: db_dependency) -> UserInDB:
         user = await decode_token(token, db)
         if not user:
                 raise HTTPException(
@@ -75,7 +84,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
         return encoded_jwt
 
 
-async def decode_token(token: str, db: Session) -> User | None:
+async def decode_token(token: str, db: Session) -> UserInDB | None:
         credentials_exception = HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
@@ -92,7 +101,7 @@ async def decode_token(token: str, db: Session) -> User | None:
         user_from_db = db.query(models.User).filter(models.User.username == username).first()
         if not user_from_db:
                 return None
-        return User( username=user_from_db.username, email=user_from_db.email)
+        return UserInDB( username=user_from_db.username, email=user_from_db.email, id=user_from_db.id)
 
 @app.get("/")
 async def helloWorld(token: Annotated[str, Depends(oauth2_scheme)]):
@@ -112,8 +121,8 @@ async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: 
         return {"access_token": access_token, "token_type": "bearer"}
 
 
-@app.get('/user/me', response_model=User)
-async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
+@app.get('/user/me', response_model=UserInDB)
+async def read_users_me(current_user: Annotated[UserInDB, Depends(get_current_user)]):
        return current_user
 
 
@@ -125,11 +134,14 @@ async def fake_register(user: UserIn, db: db_dependency):
 
         return {"user": user}
 
-# @app.post("/addUser")
-# async def addUser(user: User, db: db_dependency):
-#        db_User = models.User(username = user.username)
-#        db.add(db_User)
-#        db.commit()
+@app.post("/add_game", response_model=HostedGame)
+async def addGame(current_user: Annotated[UserInDB, Depends(get_current_user)], db: db_dependency, game: HostedGame):
+       db_hosted_game = models.HostedGame(title=game.title, startDate=datetime.now(timezone.utc), isActive=game.isActive, host=current_user.id)
+       db.add(db_hosted_game)
+       db.commit()
+       db.refresh(db_hosted_game)
+       return  db_hosted_game
 
-#        return {"user": user}
-
+@app.get("/get_hosted_games", response_model=List[HostedGame])
+async def getHostedGames(current_user: Annotated[UserInDB, Depends(get_current_user)], db: db_dependency):
+       return db.query(models.HostedGame).filter(models.HostedGame.host == current_user.id).all()
